@@ -27,13 +27,13 @@ export class Context {
   private _page: Page | null = null;
   private _console: ConsoleMessage[] = [];
   private _fileChooser: FileChooser | undefined;
-  private _lastSnapshotFrames: FrameLocator[] = [];
+  private _lastSnapshotFrames: Frame[] = [];
 
   constructor(
-    private _userDataDir: string,
-    private _launchOptions: CDPLaunchOptions,
-    private _browserType: BrowserType = chromium,
-    private _wsEndpoint?: string
+    private readonly _userDataDir: string,
+    private readonly _launchOptions: CDPLaunchOptions,
+    private readonly _browserType: BrowserType = chromium,
+    private readonly _wsEndpoint?: string
   ) {}
 
   async getBrowser(): Promise<Browser> {
@@ -74,13 +74,13 @@ export class Context {
     if (!this._page) {
       const context = await this.getBrowserContext();
       this._page = await context.newPage();
-      this._page.on('console', event => this._console.push(event));
-      this._page.on('framenavigated', frame => {
+      this._page.on('console', (event) => this._console.push(event));
+      this._page.on('framenavigated', (frame) => {
         if (!frame.parentFrame())
           this._console.length = 0;
       });
       this._page.on('close', () => this._onPageClose());
-      this._page.on('filechooser', chooser => this._fileChooser = chooser);
+      this._page.on('filechooser', (chooser) => this._fileChooser = chooser);
       this._page.setDefaultNavigationTimeout(60000);
       this._page.setDefaultTimeout(5000);
     }
@@ -102,7 +102,7 @@ export class Context {
     }
   }
 
-  private _onPageClose() {
+  private _onPageClose(): void {
     this._console.length = 0;
     this._fileChooser = undefined;
   }
@@ -111,23 +111,23 @@ export class Context {
     return this._console;
   }
 
-  async submitFileChooser(paths: string[]) {
+  async submitFileChooser(paths: string[]): Promise<void> {
     if (!this._fileChooser)
       throw new Error('No file chooser visible');
     await this._fileChooser.setFiles(paths);
     this._fileChooser = undefined;
   }
 
-  async allFramesSnapshot() {
+  async allFramesSnapshot(): Promise<string> {
     const page = await this.getPage();
     const visibleFrames = await page.locator('iframe').filter({ visible: true }).all();
-    this._lastSnapshotFrames = visibleFrames.map(frame => frame.contentFrame());
+    this._lastSnapshotFrames = visibleFrames.map((frame) => frame.contentFrame());
 
-    const snapshots = [];
+    const snapshots: string[] = [];
     for (const frame of this._lastSnapshotFrames) {
-      const snapshot = await frame.snapshot();
-      if (snapshot)
-        snapshots.push(snapshot);
+      const frameContent = await frame.content();
+      if (frameContent)
+        snapshots.push(frameContent);
     }
     return snapshots.join('\n');
   }
