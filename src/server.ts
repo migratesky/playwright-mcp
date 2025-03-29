@@ -15,68 +15,90 @@
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema, ListResourcesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListResourcesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema, ReadResourceResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { Context } from './context';
 
 import type { Tool } from './tools/tool';
 import type { Resource } from './resources/resource';
-import type { LaunchOptions } from 'playwright';
+import type { BrowserType } from 'playwright';
+import { CDPLaunchOptions } from './context';
+import { getVisibleText } from './tools/common';
 
 type Options = {
   name: string;
   version: string;
   tools: Tool[];
-  resources: Resource[],
+  resources: Resource[];
   userDataDir: string;
-  launchOptions?: LaunchOptions;
+  launchOptions?: CDPLaunchOptions;
+  browserType?: BrowserType;
+  wsEndpoint?: string;
 };
 
 export function createServerWithTools(options: Options): Server {
-  const { name, version, tools, resources, userDataDir, launchOptions } = options;
-  const context = new Context(userDataDir, launchOptions);
-  const server = new Server({ name, version }, {
+  const { name, version, tools, resources, userDataDir, launchOptions, browserType, wsEndpoint } = options;
+  console.log('Creating server with options:', {
+    name, version, userDataDir, 
+    launchOptions: { ...launchOptions, args: launchOptions?.args?.length ? launchOptions.args : undefined },
+    browserType: browserType?.name,
+    wsEndpoint
+  });
+  
+  const context = new Context(userDataDir, launchOptions, browserType, wsEndpoint);
+  const server = new Server({ name, version, wsEndpoint }, {
     capabilities: {
       tools: {},
       resources: {},
     }
   });
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: tools.map(tool => tool.schema) };
+  // Add common tools
+  const allTools = [...tools, getVisibleText];
+
+  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    return { tools: allTools.map(tool => tool.schema) };
   });
 
-  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const params = request.params;
+    const tool = allTools.find(t => t.schema.name === params.name);
+    if (!tool) {
+      return {
+        content: [{
+          type: 'text',
+          text: `Tool "${params.name}" not found`
+        }],
+        isError: true
+      };
+    }
+    return await tool.handle(context, params.arguments);
+  });
+
+  server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
     return { resources: resources.map(resource => resource.schema) };
   });
 
-  server.setRequestHandler(CallToolRequestSchema, async request => {
-    const tool = tools.find(tool => tool.schema.name === request.params.name);
-    if (!tool) {
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const params = request.params;
+    const resource = resources.find(r => r.schema.uri === params.uri);
+    if (!resource) {
       return {
-        content: [{ type: 'text', text: `Tool "${request.params.name}" not found` }],
-        isError: true,
+        content: [{
+          type: 'text',
+          text: `Resource "${params.uri}" not found`
+        }],
+        isError: true
       };
     }
-
-    try {
-      const result = await tool.handle(context, request.params.arguments);
-      return result;
-    } catch (error) {
-      return {
-        content: [{ type: 'text', text: String(error) }],
-        isError: true,
-      };
-    }
-  });
-
-  server.setRequestHandler(ReadResourceRequestSchema, async request => {
-    const resource = resources.find(resource => resource.schema.uri === request.params.uri);
-    if (!resource)
-      return { contents: [] };
-
-    const contents = await resource.read(context, request.params.uri);
-    return { contents };
+    const result = await resource.read(context, params.uri);
+    return {
+      content: result.map(r => ({
+        type: r.mimeType,
+        text: r.text
+      })),
+      isError: false
+    };
   });
 
   const oldClose = server.close.bind(server);
@@ -97,20 +119,20 @@ export class ServerList {
     this._serverFactory = serverFactory;
   }
 
-  async create() {
+  async create(): Promise<Server> {
     const server = this._serverFactory();
     this._servers.push(server);
     return server;
   }
 
-  async close(server: Server) {
+  async close(server: Server): Promise<void> {
     const index = this._servers.indexOf(server);
     if (index !== -1)
       this._servers.splice(index, 1);
     await server.close();
   }
 
-  async closeAll() {
+  async closeAll(): Promise<void> {
     await Promise.all(this._servers.map(server => server.close()));
   }
 }

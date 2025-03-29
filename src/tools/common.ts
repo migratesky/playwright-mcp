@@ -36,7 +36,7 @@ export const navigate: ToolFactory = snapshot => ({
   },
   handle: async (context, params) => {
     const validatedParams = navigateSchema.parse(params);
-    const page = await context.createPage();
+    const page = await context.getPage();
     await page.goto(validatedParams.url, { waitUntil: 'domcontentloaded' });
     // Cap load event to 5 seconds, the page is operational at this point.
     await page.waitForLoadState('load', { timeout: 5000 }).catch(() => {});
@@ -126,7 +126,7 @@ export const pdf: Tool = {
     inputSchema: zodToJsonSchema(pdfSchema),
   },
   handle: async context => {
-    const page = context.existingPage();
+    const page = await context.getPage();
     const fileName = path.join(os.tmpdir(), `/page-${new Date().toISOString()}.pdf`);
     await page.pdf({ path: fileName });
     return {
@@ -174,3 +174,36 @@ export const chooseFile: ToolFactory = snapshot => ({
     }, snapshot);
   },
 });
+
+const getVisibleTextSchema = z.object({});
+
+export const getVisibleText: Tool = {
+  schema: {
+    name: 'getVisibleText',
+    description: 'Get visible text from the page',
+    inputSchema: zodToJsonSchema(getVisibleTextSchema),
+  },
+  handle: async (context, params) => {
+    const page = await context.getPage();
+    const text = await page.evaluate(() => {
+      const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_TEXT,
+        null,
+        false
+      );
+      let text = '';
+      let node;
+      while ((node = walker.nextNode()) !== null) {
+        text += node.nodeValue?.trim() + ' ';
+      }
+      return text.trim();
+    });
+    return {
+      content: [{
+        type: 'text',
+        text: text
+      }]
+    };
+  }
+};

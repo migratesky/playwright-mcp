@@ -24,7 +24,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 type Fixtures = {
   client: Client;
   visionClient: Client;
-  startClient: (options?: { env?: NodeJS.ProcessEnv, vision?: boolean }) => Promise<Client>;
+  startClient: (options?: { env?: NodeJS.ProcessEnv, vision?: boolean, cdpEndpoint?: string }) => Promise<Client>;
   wsEndpoint: string;
 };
 
@@ -43,9 +43,18 @@ export const test = baseTest.extend<Fixtures>({
     let client: StdioClientTransport | undefined;
 
     use(async options => {
-      const args = ['--headless', '--user-data-dir', userDataDir];
+      const args = [];
+      if (options?.env) {
+        Object.entries(options.env).forEach(([key, value]) => {
+          args.push(`--env=${key}=${value}`);
+        });
+      }
       if (options?.vision)
         args.push('--vision');
+      if (options?.cdpEndpoint) {
+        // Pass the CDP endpoint directly as a command line argument
+        args.push(`--ws-endpoint`, options.cdpEndpoint);
+      }
       const transport = new StdioClientTransport({
         command: 'node',
         args: [path.join(__dirname, '../cli.js'), ...args],
@@ -61,7 +70,8 @@ export const test = baseTest.extend<Fixtures>({
 
   wsEndpoint: async ({ }, use) => {
     const browserServer = await chromium.launchServer();
-    await use(browserServer.wsEndpoint());
+    const wsEndpoint = browserServer.wsEndpoint();
+    await use(wsEndpoint);
     await browserServer.close();
   },
 });

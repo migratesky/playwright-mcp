@@ -23,7 +23,6 @@ import { program } from 'commander';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 
-
 import { createServer } from './index';
 import { ServerList } from './server';
 
@@ -39,26 +38,46 @@ program
     .option('--user-data-dir <path>', 'Path to the user data directory')
     .option('--vision', 'Run server that uses screenshots (Aria snapshots are used by default)')
     .option('--port <port>', 'Port to listen on for SSE transport.')
+    .option('--ws-endpoint <endpoint>', 'WebSocket endpoint for CDP connection')
     .action(async options => {
+      console.log('Starting program...');
+      console.log('Options:', options);
+      
+      // Get CDP endpoint from command line arguments
+      const wsEndpoint = options.wsEndpoint;
+      console.log('Using wsEndpoint:', wsEndpoint);
+      
       const launchOptions: LaunchOptions = {
         headless: !!options.headless,
         channel: 'chrome',
+        args: wsEndpoint ? undefined : ['--remote-debugging-port=9222']
       };
+      
+      console.log('Launch options:', launchOptions);
+      
       const userDataDir = options.userDataDir ?? await createUserDataDir();
+      console.log('Using userDataDir:', userDataDir);
+      
       const serverList = new ServerList(() => createServer({
         userDataDir,
         launchOptions,
         vision: !!options.vision,
+        wsEndpoint
       }));
+      
       setupExitWatchdog(serverList);
 
       if (options.port) {
+        console.log('Starting SSE server on port:', options.port);
         startSSEServer(+options.port, serverList);
       } else {
+        console.log('Starting server with stdio transport...');
         const server = await serverList.create();
         await server.connect(new StdioServerTransport());
       }
     });
+
+program.parse(process.argv);
 
 function setupExitWatchdog(serverList: ServerList) {
   process.stdin.on('close', async () => {
@@ -67,8 +86,6 @@ function setupExitWatchdog(serverList: ServerList) {
     process.exit(0);
   });
 }
-
-program.parse(process.argv);
 
 async function createUserDataDir() {
   let cacheDirectory: string;
@@ -102,46 +119,13 @@ async function startSSEServer(port: number, serverList: ServerList) {
         res.end('Session not found');
         return;
       }
-
-      await transport.handlePostMessage(req, res);
-      return;
-    } else if (req.method === 'GET') {
-      const transport = new SSEServerTransport('/sse', res);
-      sessions.set(transport.sessionId, transport);
       const server = await serverList.create();
-      res.on('close', () => {
-        sessions.delete(transport.sessionId);
-        serverList.close(server).catch(e => console.error(e));
-      });
       await server.connect(transport);
-      return;
-    } else {
-      res.statusCode = 405;
-      res.end('Method not allowed');
+      res.end('Connected');
     }
   });
 
   httpServer.listen(port, () => {
-    const address = httpServer.address();
-    assert(address, 'Could not bind server socket');
-    let url: string;
-    if (typeof address === 'string') {
-      url = address;
-    } else {
-      const resolvedPort = address.port;
-      let resolvedHost = address.family === 'IPv4' ? address.address : `[${address.address}]`;
-      if (resolvedHost === '0.0.0.0' || resolvedHost === '[::]')
-        resolvedHost = 'localhost';
-      url = `http://${resolvedHost}:${resolvedPort}`;
-    }
-    console.log(`Listening on ${url}`);
-    console.log('Put this in your client config:');
-    console.log(JSON.stringify({
-      'mcpServers': {
-        'playwright': {
-          'url': `${url}/sse`
-        }
-      }
-    }, undefined, 2));
+    console.log(`SSE server listening on port ${port}`);
   });
 }

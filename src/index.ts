@@ -67,11 +67,19 @@ type Options = {
   userDataDir?: string;
   launchOptions?: LaunchOptions;
   vision?: boolean;
+  wsEndpoint?: string;
 };
 
 const packageJSON = require('../package.json');
 
 export function createServer(options?: Options): Server {
+  console.log('Creating server with options:', {
+    vision: options?.vision,
+    userDataDir: options?.userDataDir,
+    launchOptions: options?.launchOptions,
+    wsEndpoint: options?.wsEndpoint
+  });
+  
   const tools = options?.vision ? screenshotTools : snapshotTools;
   return createServerWithTools({
     name: 'Playwright',
@@ -80,5 +88,6 @@ export function createServer(options?: Options): Server {
     resources,
     userDataDir: options?.userDataDir ?? '',
     launchOptions: options?.launchOptions,
+    wsEndpoint: options?.wsEndpoint
   });
 }
